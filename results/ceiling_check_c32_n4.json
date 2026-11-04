@@ -1,0 +1,321 @@
+{
+  "args": {
+    "cmd": "ceiling",
+    "jammer": "sequential",
+    "n_jammers": 4,
+    "obs_quant": "soft",
+    "cnn_path": "cnn_best.pt",
+    "snr": 10.0,
+    "channels": 32,
+    "history": 4,
+    "obs_delay": 0,
+    "episodes": 300,
+    "table_episodes": 0,
+    "methods": null,
+    "out_tag": "",
+    "afh_window": 4,
+    "eval_episodes": 1000,
+    "episode_len": 100,
+    "switch_cost": 0.0,
+    "seeds": 5,
+    "static_dwell": 50.0,
+    "p_know": 0.9,
+    "jammers": [
+      "sequential",
+      "permutation",
+      "reactive",
+      "random",
+      "multi",
+      "static",
+      "fhss_aware"
+    ],
+    "delays": [
+      0,
+      2,
+      4,
+      28
+    ]
+  },
+  "rows": [
+    {
+      "jammer": "sequential",
+      "delay": 0,
+      "theory": 99.375,
+      "bayes_mc": 99.37,
+      "bayes_se": 0.013149144458860862,
+      "random_mc": 96.8662,
+      "random_se": 0.01796496590589596,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "sequential",
+      "delay": 2,
+      "theory": 98.443,
+      "bayes_mc": 98.4204,
+      "bayes_se": 0.023256396969437116,
+      "random_mc": 96.8662,
+      "random_se": 0.01796496590589596,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "sequential",
+      "delay": 4,
+      "theory": 97.85804,
+      "bayes_mc": 97.8336,
+      "bayes_se": 0.02534284909002792,
+      "random_mc": 96.8662,
+      "random_se": 0.01796496590589596,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "sequential",
+      "delay": 28,
+      "theory": 96.87848170636049,
+      "bayes_mc": 96.87039999999999,
+      "bayes_se": 0.029962643408083807,
+      "random_mc": 96.8662,
+      "random_se": 0.01796496590589596,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "permutation",
+      "delay": 0,
+      "theory": 99.375,
+      "bayes_mc": 99.37339999999999,
+      "bayes_se": 0.014555411364850376,
+      "random_mc": 96.88839999999999,
+      "random_se": 0.016216041440500168,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "permutation",
+      "delay": 2,
+      "theory": 98.443,
+      "bayes_mc": 98.44059999999999,
+      "bayes_se": 0.019584687896416184,
+      "random_mc": 96.88839999999999,
+      "random_se": 0.016216041440500168,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "permutation",
+      "delay": 4,
+      "theory": 97.85804,
+      "bayes_mc": 97.8608,
+      "bayes_se": 0.01589465318904459,
+      "random_mc": 96.88839999999999,
+      "random_se": 0.016216041440500168,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "permutation",
+      "delay": 28,
+      "theory": 96.87848170636049,
+      "bayes_mc": 96.8886,
+      "bayes_se": 0.014807430567118614,
+      "random_mc": 96.88839999999999,
+      "random_se": 0.016216041440500168,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "reactive",
+      "delay": 0,
+      "theory": 99.040625,
+      "bayes_mc": 99.0626,
+      "bayes_se": 0.008744140895478597,
+      "random_mc": 96.89320000000001,
+      "random_se": 0.02668220380703249,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "reactive",
+      "delay": 2,
+      "theory": 99.040625,
+      "bayes_mc": 99.0626,
+      "bayes_se": 0.008744140895478597,
+      "random_mc": 96.89320000000001,
+      "random_se": 0.02668220380703249,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "reactive",
+      "delay": 4,
+      "theory": 99.040625,
+      "bayes_mc": 99.0626,
+      "bayes_se": 0.008744140895478597,
+      "random_mc": 96.89320000000001,
+      "random_se": 0.02668220380703249,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "reactive",
+      "delay": 28,
+      "theory": 99.040625,
+      "bayes_mc": 99.0626,
+      "bayes_se": 0.008744140895478597,
+      "random_mc": 96.89320000000001,
+      "random_se": 0.02668220380703249,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "random",
+      "delay": 0,
+      "theory": 96.875,
+      "bayes_mc": 96.88320000000002,
+      "bayes_se": 0.02419999999999957,
+      "random_mc": 96.88320000000002,
+      "random_se": 0.02419999999999957,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "random",
+      "delay": 2,
+      "theory": 96.875,
+      "bayes_mc": 96.88320000000002,
+      "bayes_se": 0.02419999999999957,
+      "random_mc": 96.88320000000002,
+      "random_se": 0.02419999999999957,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "random",
+      "delay": 4,
+      "theory": 96.875,
+      "bayes_mc": 96.88320000000002,
+      "bayes_se": 0.02419999999999957,
+      "random_mc": 96.88320000000002,
+      "random_se": 0.02419999999999957,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "random",
+      "delay": 28,
+      "theory": 96.875,
+      "bayes_mc": 96.88320000000002,
+      "bayes_se": 0.02419999999999957,
+      "random_mc": 96.88320000000002,
+      "random_se": 0.02419999999999957,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "multi4",
+      "delay": 0,
+      "theory": 97.5233399963379,
+      "bayes_mc": 97.51140000000001,
+      "bayes_se": 0.02344909379912008,
+      "random_mc": 88.1286,
+      "random_se": 0.059033549783152464,
+      "random_theory": 88.07382583618164
+    },
+    {
+      "jammer": "multi4",
+      "delay": 2,
+      "theory": 93.91883830845964,
+      "bayes_mc": 93.88879999999999,
+      "bayes_se": 0.019090311678964737,
+      "random_mc": 88.1286,
+      "random_se": 0.059033549783152464,
+      "random_theory": 88.07382583618164
+    },
+    {
+      "jammer": "multi4",
+      "delay": 4,
+      "theory": 91.70582841007135,
+      "bayes_mc": 91.69380000000001,
+      "bayes_se": 0.021880127970375224,
+      "random_mc": 88.1286,
+      "random_se": 0.059033549783152464,
+      "random_theory": 88.07382583618164
+    },
+    {
+      "jammer": "multi4",
+      "delay": 28,
+      "theory": 88.08648834604298,
+      "bayes_mc": 88.13,
+      "bayes_se": 0.051744564931980215,
+      "random_mc": 88.1286,
+      "random_se": 0.059033549783152464,
+      "random_theory": 88.07382583618164
+    },
+    {
+      "jammer": "static",
+      "delay": 0,
+      "theory": 99.75023427735901,
+      "bayes_mc": 99.75840000000001,
+      "bayes_se": 0.0033999999999998498,
+      "random_mc": 88.07939999999999,
+      "random_se": 0.07800871746157609,
+      "random_theory": 88.07382583618164
+    },
+    {
+      "jammer": "static",
+      "delay": 2,
+      "theory": 99.04306195196001,
+      "bayes_mc": 99.0346,
+      "bayes_se": 0.013343912469735111,
+      "random_mc": 88.07939999999999,
+      "random_se": 0.07800871746157609,
+      "random_theory": 88.07382583618164
+    },
+    {
+      "jammer": "static",
+      "delay": 4,
+      "theory": 98.37518476664019,
+      "bayes_mc": 98.3644,
+      "bayes_se": 0.021280507512744583,
+      "random_mc": 88.07939999999999,
+      "random_se": 0.07800871746157609,
+      "random_theory": 88.07382583618164
+    },
+    {
+      "jammer": "static",
+      "delay": 28,
+      "theory": 92.7523935651291,
+      "bayes_mc": 92.77860000000001,
+      "bayes_se": 0.06588216754175741,
+      "random_mc": 88.07939999999999,
+      "random_se": 0.07800871746157609,
+      "random_theory": 88.07382583618164
+    },
+    {
+      "jammer": "fhss_aware",
+      "delay": 0,
+      "theory": 99.6875,
+      "bayes_mc": 99.68960000000001,
+      "bayes_se": 0.008908422980525969,
+      "random_mc": 96.818,
+      "random_se": 0.01873766260770111,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "fhss_aware",
+      "delay": 2,
+      "theory": 99.6875,
+      "bayes_mc": 99.68960000000001,
+      "bayes_se": 0.008908422980525969,
+      "random_mc": 96.818,
+      "random_se": 0.01873766260770111,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "fhss_aware",
+      "delay": 4,
+      "theory": 99.6875,
+      "bayes_mc": 99.68960000000001,
+      "bayes_se": 0.008908422980525969,
+      "random_mc": 96.818,
+      "random_se": 0.01873766260770111,
+      "random_theory": 96.875
+    },
+    {
+      "jammer": "fhss_aware",
+      "delay": 28,
+      "theory": 99.6875,
+      "bayes_mc": 99.68960000000001,
+      "bayes_se": 0.008908422980525969,
+      "random_mc": 96.818,
+      "random_se": 0.01873766260770111,
+      "random_theory": 96.875
+    }
+  ]
+}

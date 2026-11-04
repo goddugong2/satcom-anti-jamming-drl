@@ -1,0 +1,83 @@
+[
+  {
+    "file": "w12",
+    "jammer_id": 4,
+    "rel_power": 0.5,
+    "distance_m": 10,
+    "Nojamming": {
+      "ber_raw": 8.320808410644531e-05,
+      "ber_tone_cancel": 8.320808410644531e-05,
+      "ber_resync_every_block": 6.318092346191406e-05,
+      "slips": 5,
+      "sinr_db_median": 22.2738275879702
+    },
+    "Sine": {
+      "ber_raw": 0.00017511844635009766,
+      "ber_tone_cancel": 0.00017499923706054688,
+      "ber_resync_every_block": 0.0008925199508666992,
+      "slips": 36,
+      "sinr_db_median": 11.418744187177898
+    },
+    "Gaussian": {
+      "ber_raw": 0.002438068389892578,
+      "ber_tone_cancel": 0.002438068389892578,
+      "ber_resync_every_block": 0.016455531120300293,
+      "slips": 657,
+      "sinr_db_median": 13.03559546418397
+    }
+  },
+  {
+    "file": "w19",
+    "jammer_id": 4,
+    "rel_power": 0.5,
+    "distance_m": 10,
+    "Nojamming": {
+      "ber_raw": 0.1641167402267456,
+      "ber_tone_cancel": 0.1641167402267456,
+      "ber_resync_every_block": 0.17151737213134766,
+      "slips": 10182,
+      "sinr_db_median": 21.705428923981568
+    },
+    "Sine": {
+      "ber_raw": 0.0268709659576416,
+      "ber_tone_cancel": 0.02635955810546875,
+      "ber_resync_every_block": 0.10496866703033447,
+      "slips": 5130,
+      "sinr_db_median": 5.758933133677695
+    },
+    "Gaussian": {
+      "ber_raw": 0.01543581485748291,
+      "ber_tone_cancel": 0.01543581485748291,
+      "ber_resync_every_block": 0.08847546577453613,
+      "slips": 3994,
+      "sinr_db_median": 9.86110472540144
+    }
+  },
+  {
+    "file": "w27",
+    "jammer_id": 4,
+    "rel_power": 0.5,
+    "distance_m": 10,
+    "Nojamming": {
+      "ber_raw": 9.5367431640625e-07,
+      "ber_tone_cancel": 9.5367431640625e-07,
+      "ber_resync_every_block": 9.5367431640625e-07,
+      "slips": 0,
+      "sinr_db_median": 25.995484904531963
+    },
+    "Sine": {
+      "ber_raw": 0.009074687957763672,
+      "ber_tone_cancel": 0.008941888809204102,
+      "ber_resync_every_block": 0.04308438301086426,
+      "slips": 1977,
+      "sinr_db_median": 6.654193929875902
+    },
+    "Gaussian": {
+      "ber_raw": 0.024868011474609375,
+      "ber_tone_cancel": 0.024868011474609375,
+      "ber_resync_every_block": 0.11467695236206055,
+      "slips": 5542,
+      "sinr_db_median": 8.650844210404502
+    }
+  }
+]

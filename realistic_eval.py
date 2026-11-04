@@ -10,6 +10,10 @@
     python train_cnn.py --data dataset_ch.npz --out cnn_ch.pt
     python realistic_eval.py detect --cnn-path cnn_best.pt --compare-cnn cnn_ch.pt --out-tag leo550_aug
 
+    # 3단계: 위성 한 번 통과 동안의 통신 성공률 (채널 -> CNN 탐지 -> DQN 채널 선택)
+    python realistic_eval.py pass --cnn-path cnn_best.pt --out-tag leo550_base
+    python realistic_eval.py pass --cnn-path cnn_ch.pt --out-tag leo550_aug
+
 비교 조건(같은 앙각, 같은 링크 SNR에서 한 가지씩 켬)
     awgn      : 기존 시뮬레이션과 같은 AWGN + 재머 (링크 SNR만 앙각에 따라 변함)
     doppler   : + 도플러 편이
@@ -78,6 +82,149 @@ def build_bank_ch(cnn_path, p, el_deg, jsr_db, n_per_class=500, seed=0, device=N
     p_jam = 1.0 - predict_proba(model, x, device)[:, 0]
     jam = y != 0
     return SensingBank(p_jam[~jam], p_jam[jam])
+
+
+def pass_geometry(h_km, el_edges):
+    """관측자 바로 위를 지나는 원궤도 통과에서 앙각 구간별 체류 시간 비율과 전체 가시 시간(초).
+
+    지구 중심각 theta는 시간에 비례해 변하고(각속도 v/r), 앙각 E에서 theta(E) = arccos(Re cosE / r) - E.
+    따라서 [E_lo, E_hi] 구간에 머무는 시간은 theta(E_lo) - theta(E_hi)에 비례한다(상승, 하강 대칭이므로 2배).
+    """
+    r = ch.RE_KM + h_km
+
+    def theta(e_deg):
+        e = np.radians(e_deg)
+        return np.arccos(ch.RE_KM * np.cos(e) / r) - e
+
+    w = np.array([theta(lo) - theta(hi) for lo, hi in zip(el_edges[:-1], el_edges[1:])])
+    omega = np.sqrt(ch.MU_KM3S2 / r) / r                   # rad/s
+    visible_s = 2 * theta(el_edges[0]) / omega
+    return w / w.sum(), float(visible_s)
+
+
+def _bank(model, classes, device, p, el, jsr, n_per_class, rng):
+    from env import SensingBank
+    x, y = make_set(classes, n_per_class, jsr, p, el, rng)
+    p_jam = 1.0 - predict_proba(model, x, device)[:, 0]
+    jam = y != 0
+    return SensingBank(p_jam[~jam], p_jam[jam])
+
+
+def cmd_pass(args):
+    """채널(앙각별) -> CNN 탐지 은행 -> 채널 도약 정책의 통신 성공률, 그리고 통과 전체의 시간 가중 평균.
+
+    학습: --train-bank pass 이면 통과 시간 비율대로 섞은 앙각별 은행으로 한 번 학습(실제 운용처럼 한 정책이
+    통과 전체를 담당), awgn 이면 기존 실험과 같은 AWGN 은행(SNR --awgn-snr)으로 학습해 배치 불일치를 본다.
+    평가: 학습된 같은 정책을 앙각별 은행에서 각각 평가.
+    """
+    import argparse as _ap
+    import time
+
+    import run_e2e as R
+    from env import SensingBank
+
+    t0 = time.time()
+    device = get_device()
+    model, classes = load_cnn(args.cnn_path, device)
+    base = ch.ChannelParams(h_km=args.h_km, fc_ghz=args.fc_ghz, rs_ksps=args.rs_ksps,
+                            snr_zenith_db=args.snr_zenith, doppler_residual=args.doppler_residual,
+                            jammer_doppler=args.jammer_doppler)
+    els = list(args.elevations)
+    edges = [els[0]] + [(a + b) / 2 for a, b in zip(els[:-1], els[1:])] + [els[-1]]
+    w, visible_s = pass_geometry(args.h_km, edges)
+
+    rng = np.random.default_rng(args.seed)
+    banks = [_bank(model, classes, device, base, el, args.jsr, args.bank_n, rng) for el in els]
+    if args.train_bank == "pass":
+        tr_rng = np.random.default_rng(args.seed + 1)
+        n_tot = sum(len(b.p_clean) for b in banks)
+        pc = np.concatenate([tr_rng.choice(b.p_clean, max(1, int(round(wi * n_tot)))) for b, wi in zip(banks, w)])
+        pj = np.concatenate([tr_rng.choice(b.p_jammed, max(1, int(round(wi * n_tot)))) for b, wi in zip(banks, w)])
+        train_bank = SensingBank(pc, pj)
+    else:
+        train_bank = SensingBank.build(args.cnn_path, args.awgn_snr, args.jsr, seed=0)
+
+    rargs = _ap.Namespace(channels=args.channels, jammer=args.jammer, n_jammers=args.n_jammers,
+                          history=args.history, episode_len=args.episode_len, switch_cost=0.0,
+                          obs_delay=args.obs_delay, obs_quant=args.obs_quant, episodes=args.episodes,
+                          table_episodes=args.table_episodes, afh_window=4, eval_episodes=args.eval_episodes,
+                          static_dwell=50.0, p_know=0.9)
+    ceiling = R.ceiling_of(rargs)
+
+    print(f"[통과] 고도 {args.h_km:.0f} km, 앙각 {els[0]:g}도 이상 가시 시간 약 {visible_s:.0f}초 | "
+          f"CNN {args.cnn_path} | 학습 은행 {args.train_bank} (TPR {train_bank.tpr * 100:.1f}%, FPR {train_bank.fpr * 100:.1f}%)")
+    print(f"[환경] 재머 {R.jname(rargs)}, 채널 {args.channels}, 관측 {args.obs_quant}, 지연 {args.obs_delay}, "
+          f"DQN {args.episodes} / 표 {args.table_episodes or args.episodes} 에피소드, 시드 {args.seeds}, 이론 상한 {ceiling:.2f}%")
+
+    res = {m: np.zeros((args.seeds, len(els))) for m in args.methods}
+    for seed in range(args.seeds):
+        for m in args.methods:
+            R.set_seed(seed)
+            cnn_obs = m in R.CNN_METHODS
+            env = R.make_env(rargs, "cnn" if cnn_obs else "oracle", train_bank if cnn_obs else None, seed)
+            policy = R.build_policy(m, env, rargs, seed)
+            if m in R.LEARNING_METHODS:
+                for _ in range(R.episodes_for(m, rargs)):
+                    R.run_episode(env, policy, greedy=False, learn=True)
+            for i, b in enumerate(banks):
+                ev = R.make_env(rargs, "cnn" if cnn_obs else "oracle", b if cnn_obs else None,
+                                seed + 10_000 + 100 * i, pattern_seed=seed)
+                if hasattr(policy, "env"):
+                    policy.env = ev
+                res[m][seed, i] = np.mean([R.run_episode(ev, policy, greedy=True, learn=False)
+                                           for _ in range(args.eval_episodes)])
+            print(f"  seed {seed} | {m:11s} 통과 평균 {float(res[m][seed] @ w):.2f}% | 앙각별 "
+                  + " ".join(f"{v:.1f}" for v in res[m][seed]))
+
+    summary = {}
+    for m in args.methods:
+        per_el = res[m].mean(0)
+        pass_avg = res[m] @ w
+        summary[m] = {"per_el_mean": per_el.tolist(), "per_el_std": res[m].std(0).tolist(),
+                      "pass_mean": float(pass_avg.mean()), "pass_std": float(pass_avg.std()),
+                      "raw": res[m].tolist()}
+    print(f"\n{'앙각':>5s} {'시간비':>6s} {'FPR':>6s} | " + " | ".join(f"{m:>10s}" for m in args.methods))
+    for i, el in enumerate(els):
+        print(f"{el:5.0f} {w[i] * 100:5.1f}% {banks[i].fpr * 100:5.1f}% | "
+              + " | ".join(f"{summary[m]['per_el_mean'][i]:10.2f}" for m in args.methods))
+    print(f"{'통과 평균':>19s} | " + " | ".join(f"{summary[m]['pass_mean']:6.2f}±{summary[m]['pass_std']:.2f}"
+                                           for m in args.methods) + f"   (이론 상한 {ceiling:.2f})")
+
+    import run_e2e as R2
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 4.8), gridspec_kw={"width_ratios": [1.6, 1]})
+    for m in args.methods:
+        a1.errorbar(els, summary[m]["per_el_mean"], yerr=summary[m]["per_el_std"], color=R2.COLORS.get(m, "k"),
+                    marker="o", lw=2 if m.startswith("dqn") else 1.3, capsize=3, label=R2.LABELS.get(m, m))
+    a1.axhline(ceiling, color="black", ls=(0, (1, 3)), lw=1.2, label=f"theory ceiling ({ceiling:.1f}%)")
+    a1.set_xlabel("Elevation (deg)"); a1.set_ylabel("Communication success rate (%)")
+    a1.set_title(f"Satellite pass, LEO {args.h_km:.0f} km | {R2.jname(rargs)}, C={args.channels}, "
+                 f"J/S {args.jsr:g} dB, train bank: {args.train_bank}", fontsize=9)
+    a1.grid(ls=":"); a1.legend(fontsize=7, loc="lower right")
+    tw = a1.twinx()
+    tw.bar(els, [b.fpr * 100 for b in banks], width=4, color="gray", alpha=0.25, label="CNN FPR")
+    tw.set_ylabel("CNN false-positive rate (%, gray bars)"); tw.set_ylim(0, max(40, 2 * max(b.fpr * 100 for b in banks)))
+    ms = list(args.methods)
+    a2.barh(ms, [summary[m]["pass_mean"] for m in ms], xerr=[summary[m]["pass_std"] for m in ms],
+            color=[R2.COLORS.get(m, "gray") for m in ms], capsize=3)
+    for i, m in enumerate(ms):
+        a2.text(summary[m]["pass_mean"] + 0.3, i, f"{summary[m]['pass_mean']:.1f}", va="center", fontsize=9)
+    lo = min(summary[m]["pass_mean"] for m in ms)
+    a2.set_xlim(max(0, lo - 8), 100.5)
+    a2.set_xlabel("Pass-averaged success rate (%, time-weighted)")
+    a2.set_title(f"Whole pass (elev >= {els[0]:g} deg, ~{visible_s:.0f} s)")
+    a2.grid(axis="x", ls=":")
+    plt.tight_layout()
+    tag = f"realistic_pass_{args.out_tag}" if args.out_tag else "realistic_pass"
+    plt.savefig(f"{tag}.png", dpi=200)
+    plt.close(fig)
+    with open(f"{tag}.json", "w") as f:
+        json.dump({"params": asdict(base), "jsr_db": args.jsr, "cnn_path": args.cnn_path,
+                   "train_bank": args.train_bank, "env": vars(rargs), "ceiling": ceiling,
+                   "elevations": els, "time_weights": w.tolist(), "visible_s": visible_s,
+                   "bank": [{"el": el, **ch.describe(base, el), "tpr": b.tpr, "fpr": b.fpr} for el, b in zip(els, banks)],
+                   "train_bank_rates": {"tpr": train_bank.tpr, "fpr": train_bank.fpr},
+                   "summary": summary}, f, indent=2)
+    print(f"saved {tag}.png, {tag}.json  ({time.time() - t0:.0f}s)")
 
 
 def cmd_dataset(args):
@@ -220,8 +367,35 @@ def main():
     s.add_argument("--snr-zenith-range", type=float, nargs=2, default=[10.0, 20.0])
     s.add_argument("--seed", type=int, default=123)
     s.add_argument("--out", default="dataset_ch.npz")
+    q = sub.add_parser("pass", help="위성 한 번 통과 동안 채널 -> CNN -> 채널 도약 정책의 통신 성공률")
+    q.add_argument("--cnn-path", default="cnn_best.pt")
+    q.add_argument("--elevations", type=float, nargs="+", default=[10, 20, 30, 45, 60, 75, 90])
+    q.add_argument("--h-km", type=float, default=550.0)
+    q.add_argument("--fc-ghz", type=float, default=2.2)
+    q.add_argument("--rs-ksps", type=float, default=100.0)
+    q.add_argument("--snr-zenith", type=float, default=15.0)
+    q.add_argument("--jsr", type=float, default=8.0)
+    q.add_argument("--doppler-residual", type=float, default=1.0)
+    q.add_argument("--jammer-doppler", action="store_true")
+    q.add_argument("--bank-n", type=int, default=500, help="앙각별 은행의 클래스당 샘플 수")
+    q.add_argument("--train-bank", choices=("pass", "awgn"), default="pass")
+    q.add_argument("--awgn-snr", type=float, default=10.0, help="--train-bank awgn 일 때의 SNR")
+    q.add_argument("--channels", type=int, default=32)
+    q.add_argument("--jammer", default="multi")
+    q.add_argument("--n-jammers", type=int, default=4)
+    q.add_argument("--history", type=int, default=4)
+    q.add_argument("--obs-delay", type=int, default=0)
+    q.add_argument("--obs-quant", choices=("soft", "binary"), default="binary")
+    q.add_argument("--episodes", type=int, default=800)
+    q.add_argument("--table-episodes", type=int, default=10000)
+    q.add_argument("--episode-len", type=int, default=100)
+    q.add_argument("--eval-episodes", type=int, default=100)
+    q.add_argument("--seeds", type=int, default=3)
+    q.add_argument("--methods", nargs="+", default=["random", "afh", "qtable", "dqn_oracle", "dqn_cnn"])
+    q.add_argument("--seed", type=int, default=0)
+    q.add_argument("--out-tag", default="")
     args = ap.parse_args()
-    {"detect": cmd_detect, "dataset": cmd_dataset}[args.cmd](args)
+    {"detect": cmd_detect, "dataset": cmd_dataset, "pass": cmd_pass}[args.cmd](args)
 
 
 if __name__ == "__main__":

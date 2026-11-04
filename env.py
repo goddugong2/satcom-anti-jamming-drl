@@ -16,6 +16,10 @@
   reactive   : 에이전트가 직전에 쓴 채널을 확률 p_react로 추적
   permutation: 고정된 임의 순환 순서로 이동 (순서는 pattern_seed로 결정)
   multi      : n_jammers개의 독립 순차형 재머가 동시에 서로 다른 위치를 공격 (다중/부분대역 재밍)
+  static     : n_jammers개의 재머가 한 채널에 평균 static_dwell 슬롯 머물다가 무작위 채널로 옮김
+               (AFH의 블랙리스트가 원래 겨냥하는 '오래 머무는' 재머)
+  fhss_aware : FHSS 도약 패턴을 아는 재머. 확률 p_know로 FHSS가 이번 슬롯에 쓸 채널을 공격, 아니면 무작위
+               (패턴이 유출된 경우의 FHSS 취약성 확인용)
 
 정답(재머 위치)은 hit/보상 계산에만 쓰이고, cnn 모드에서는 상태로 새지 않는다.
 """
@@ -23,7 +27,14 @@ from collections import deque
 
 import numpy as np
 
-JAMMER_MODELS = ("sequential", "random", "reactive", "permutation", "multi")
+JAMMER_MODELS = ("sequential", "random", "reactive", "permutation", "multi", "static", "fhss_aware")
+
+
+def fhss_pattern(num_channels, episode_len, seed):
+    """FHSS 송수신이 공유하는 도약 패턴: 채널 순열을 이어 붙임 (run_e2e.FHSSPolicy와 같은 패턴)."""
+    rng = np.random.default_rng(seed + 777)
+    blocks = -(-episode_len // num_channels)
+    return np.concatenate([rng.permutation(num_channels) for _ in range(blocks)])
 
 
 class SensingBank:
@@ -89,13 +100,13 @@ class AntiJammingEnv:
     def __init__(self, num_channels=8, jammer="sequential", obs_mode="oracle", bank=None,
                  history=4, episode_len=100, switch_cost=0.0,
                  p_follow=0.8, p_react=0.7, seed=None, pattern_seed=0, obs_delay=0,
-                 n_jammers=3, obs_quant="soft"):
+                 n_jammers=3, obs_quant="soft", static_dwell=50.0, p_know=0.9):
         assert jammer in JAMMER_MODELS, f"jammer must be one of {JAMMER_MODELS}"
         assert obs_mode in ("oracle", "cnn")
         assert obs_quant in ("soft", "binary")
         if obs_mode == "cnn":
             assert bank is not None, "cnn 모드는 SensingBank가 필요합니다"
-        if jammer == "multi":
+        if jammer in ("multi", "static"):
             assert 1 <= n_jammers < num_channels, "n_jammers는 채널 수보다 작아야 합니다"
         self.C = num_channels
         self.jammer_model = jammer
@@ -109,6 +120,8 @@ class AntiJammingEnv:
         self.p_react = p_react          # reactive: 에이전트의 직전 채널로 이동할 확률
         self.n_jam = n_jammers          # multi: 동시에 공격하는 재머 수
         self.delay = obs_delay          # 센싱 결과가 늦게 도착하는 슬롯 수 (위성 전파 지연 모의)
+        self.static_dwell = static_dwell  # static: 한 채널에 머무는 평균 슬롯 수
+        self.p_know = p_know            # fhss_aware: FHSS 패턴 채널을 공격할 확률
         self.rng = np.random.default_rng(seed)
 
         # permutation 재머: pattern_seed로 정해진 고정 순환 순서로 채널을 순회
@@ -116,6 +129,8 @@ class AntiJammingEnv:
         order = np.random.default_rng(pattern_seed).permutation(self.C)
         self.successor = np.empty(self.C, dtype=int)
         self.successor[order] = np.roll(order, -1)
+        # fhss_aware 재머가 아는 FHSS 패턴 (FHSSPolicy가 같은 seed로 만드는 패턴과 동일)
+        self.fhss_pat = fhss_pattern(self.C, episode_len, pattern_seed)
 
         self.state_dim = self.k * self.C + self.C    # 관측 k스텝 + 내 직전 채널(one-hot)
         self.action_dim = self.C
@@ -123,7 +138,7 @@ class AntiJammingEnv:
     # ---------------- 센싱 / 상태 ----------------
     def jam_set(self):
         """현재 공격받는 채널들 (정답. hit 판정과 센싱 시뮬레이션에만 사용)."""
-        if self.jammer_model == "multi":
+        if self.jammer_model in ("multi", "static"):
             return self.jam_pos
         return np.array([self.jammer])
 
@@ -191,12 +206,22 @@ class AntiJammingEnv:
             jump = self.rng.integers(self.C, size=self.n_jam)
             self.jam_pos = np.where(follow, (self.jam_pos + 1) % self.C, jump)
             self.jammer = int(self.jam_pos[0])
+        elif m == "static":
+            move = self.rng.random(self.n_jam) < 1.0 / self.static_dwell
+            jump = self.rng.integers(self.C, size=self.n_jam)
+            self.jam_pos = np.where(move, jump, self.jam_pos)
+            self.jammer = int(self.jam_pos[0])
+        elif m == "fhss_aware":
+            if self.rng.random() < self.p_know:   # step()에서 time_step을 먼저 올리므로 이번 슬롯 = time_step-1
+                self.jammer = int(self.fhss_pat[(self.time_step - 1) % len(self.fhss_pat)])
+            else:
+                self.jammer = int(self.rng.integers(self.C))
 
     # ---------------- Gym 스타일 API ----------------
     def reset(self):
         self.time_step = 0
         self.jammer = int(self.rng.integers(self.C))
-        if self.jammer_model == "multi":
+        if self.jammer_model in ("multi", "static"):
             self.jam_pos = self.rng.integers(self.C, size=self.n_jam)
             self.jammer = int(self.jam_pos[0])
         self.last_action = -1

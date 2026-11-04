@@ -51,7 +51,7 @@ import numpy as np
 import torch
 
 from dqn import DQNAgent, QLearningAgent
-from env import AntiJammingEnv, SensingBank, JAMMER_MODELS
+from env import AntiJammingEnv, SensingBank, JAMMER_MODELS, fhss_pattern
 
 torch.set_num_threads(1)
 
@@ -61,12 +61,13 @@ ALL_METHODS = ("fixed", "random", "fhss", "avoid", "afh", "qtable", "qtable2", "
 COLORS = {"dqn_oracle": "tab:green", "dqn_cnn": "tab:blue", "qtable": "tab:orange",
           "qtable2": "tab:brown", "qmask": "tab:pink", "qtable4": "tab:olive",
           "avoid": "tab:purple", "random": "crimson", "fixed": "gray",
-          "fhss": "tab:cyan", "afh": "tab:red"}
+          "fhss": "tab:cyan", "afh": "tab:red", "bayes": "black"}
 LABELS = {"dqn_oracle": "DQN (oracle observation)", "dqn_cnn": "DQN (CNN observation)",
           "qtable": "Q-table 1-step", "qtable2": "Q-table 2-step", "qtable4": "Q-table 4-step",
           "qmask": "Q-table bitmask",
           "avoid": "Sensing-avoid (no learning)", "random": "Random hopping", "fixed": "Fixed channel",
-          "fhss": "FHSS (pre-shared pattern)", "afh": "AFH (blacklist)"}
+          "fhss": "FHSS (pre-shared pattern)", "afh": "AFH (blacklist)",
+          "bayes": "Bayes-optimal (oracle obs, known jammer model)"}
 MARKERS = {"dqn_cnn": "o", "dqn_oracle": "o", "qtable": "D", "qtable2": "v", "qtable4": "X",
            "qmask": "P", "avoid": "^"}
 MAX_MASK_CHANNELS = 16     # 2^C 상태 표를 만들 수 있는 최대 채널 수
@@ -126,9 +127,7 @@ class FHSSPolicy(Policy):
 
     def __init__(self, env, seed):
         self.env = env
-        rng = np.random.default_rng(seed + 777)
-        blocks = -(-env.episode_len // env.C)
-        self.pattern = np.concatenate([rng.permutation(env.C) for _ in range(blocks)])
+        self.pattern = fhss_pattern(env.C, env.episode_len, seed)   # env.fhss_pattern과 같은 패턴
 
     def act(self, s, greedy=False):
         return int(self.pattern[self.env.time_step % len(self.pattern)])
@@ -151,6 +150,43 @@ class AFHPolicy(Policy):
         if len(cand) == 0:
             cand = np.arange(self.env.C)
         return int(self.rng.choice(cand))
+
+
+class BayesPolicy(Policy):
+    """이론 상한 검증용 베이즈 최적 정책 (학습 없음, 오라클 관측 + 재머 모델을 안다고 가정).
+
+    가장 최근 관측(d슬롯 늦음)에서 재머 위치를 읽고, 재머 모델로 이번 슬롯에 재머가 '규칙대로' 갈 채널을
+    예측해 그 채널들만 피해 무작위로 고른다. 재머가 에이전트 행동에 반응하지 않는 모델에서는
+    다음 슬롯 피격 확률을 최소화하는 이 탐욕 정책이 최적이다.
+    """
+
+    def __init__(self, env, seed):
+        self.env, self.rng = env, np.random.default_rng(seed)
+
+    def predicted(self, s):
+        env, m = self.env, self.env.jammer_model
+        k = env.delay + 1                                   # 마지막 관측 이후 재머가 움직이는 횟수
+        jam = np.flatnonzero(env.newest_obs(s) >= 0.5)
+        if m in ("sequential", "multi"):
+            return (jam + k) % env.C
+        if m == "static":
+            return jam
+        if m == "permutation":
+            for _ in range(k):
+                jam = env.successor[jam]
+            return jam
+        if m == "reactive":
+            last = env.last_action_of(s)
+            return np.array([last]) if last >= 0 else np.array([], dtype=int)
+        if m == "fhss_aware":                               # 패턴을 아는 쪽(=FHSS 송수신)의 상한
+            return np.array([env.fhss_pat[env.time_step % len(env.fhss_pat)]])
+        return np.array([], dtype=int)                      # random: 예측 불가
+
+    def act(self, s, greedy=False):
+        bad = np.zeros(self.env.C, dtype=bool)
+        bad[self.predicted(s)] = True
+        cand = np.flatnonzero(~bad)
+        return int(self.rng.choice(cand if len(cand) else np.arange(self.env.C)))
 
 
 class QTablePolicy(Policy):
@@ -228,28 +264,42 @@ def tag(args):
     return f"{jname(args)}_c{args.channels}_h{args.history}_d{args.obs_delay}{qtag(args)}"
 
 
-def theory_ceiling(jammer, delay, C, n_jammers=3, p_follow=0.8, p_react=0.7):
-    """최적 정책의 이론(근사) 성공률(%). 재머의 무작위 도약 때문에 생기는 피할 수 없는 피격만 센다.
+def theory_ceiling(jammer, delay, C, n_jammers=3, p_follow=0.8, p_react=0.7,
+                   episode_len=100, static_dwell=50.0, p_know=0.9):
+    """이론 상한(%): 재머 위치를 정확히 보는(오라클) 관측과 재머 모델을 아는 최적 정책의 기대 성공률.
 
-    순차형/순환형: 관측이 d슬롯 늦으면 (d+1)스텝 뒤를 예측해야 한다. 그 사이 한 번도
-    무작위 도약이 없을 확률은 p^(d+1)이고, 아니면 재머 위치는 균등분포가 된다.
-    최적 정책은 예측 채널을 피하므로 피격 확률은 (1 - p^(d+1)) / C.
-    다중형: 재머가 n개이고 서로 독립이라고 보고 (1 - 단일 피격확률)^n (겹침과 안전 채널 부족은 무시한 근사).
-    반응형: 지연과 무관(내 직전 채널은 지연 없이 알 수 있음).
+    정상 상태 F: 관측이 d슬롯 늦으면 재머는 마지막 관측 뒤 k=d+1번 움직인다. 규칙대로만 움직일 확률을 q^k
+    (순차형/순환형/다중형 q=p_follow, 정적형 q=1-1/dwell)라 하면, 무작위 이동은 균등분포라 k스텝 뒤 위치는
+    '규칙 위치'에 q^k + (1-q^k)/C, 나머지 채널에 (1-q^k)/C 의 확률로 있다. 재머가 에이전트에 반응하지 않으므로
+    규칙 위치가 아닌 채널을 고르는 탐욕 정책이 최적이고, 재머가 서로 독립이면 성공 확률은 (1-(1-q^k)/C)^n.
+    재머끼리 겹쳐도 n < C 이면 규칙 위치가 아닌 채널이 항상 남으므로 이 식은 근사가 아니라 정확한 값이다.
+    시작 구간: 지연 d가 있으면 에피소드 처음 d슬롯은 정보가 없어 무작위 수준 (1-1/C)^n 이다. 이를 반영해
+    에피소드 평균 = (d*R0 + (L-d)*F) / L.
+    반응형: 직전 채널을 피하면 (1-p_react)/C 만 남음(첫 슬롯은 무작위). 무작위형: 1-1/C.
+    fhss_aware: 패턴을 아는 쪽(FHSS 송수신)이 패턴 채널을 피했을 때의 값 1-(1-p_know)/C.
+    run_e2e.py ceiling 명령으로 BayesPolicy 몬테카를로와 대조할 수 있다.
     """
-    per = (1.0 - p_follow ** (delay + 1)) / C
-    if jammer in ("sequential", "permutation"):
-        return 100.0 * (1.0 - per)
-    if jammer == "multi":
-        return 100.0 * (1.0 - per) ** n_jammers
+    L = episode_len
+    d = min(delay, L)
+    if jammer == "random":
+        return 100.0 * (1.0 - 1.0 / C)
     if jammer == "reactive":
-        return 100.0 * (1.0 - (1.0 - p_react) / C)
-    return 100.0 * (1.0 - 1.0 / C)
+        F = 1.0 - (1.0 - p_react) / C
+        return 100.0 * ((1.0 - 1.0 / C) + (L - 1) * F) / L
+    if jammer == "fhss_aware":
+        return 100.0 * (1.0 - (1.0 - p_know) / C)
+    n = n_jammers if jammer in ("multi", "static") else 1
+    q = (1.0 - 1.0 / static_dwell) if jammer == "static" else p_follow
+    per = (1.0 - q ** (delay + 1)) / C
+    F = (1.0 - per) ** n
+    R0 = (1.0 - 1.0 / C) ** n
+    return 100.0 * (d * R0 + (L - d) * F) / L
 
 
 def ceiling_of(args, delay=None):
     d = args.obs_delay if delay is None else delay
-    return theory_ceiling(args.jammer, d, args.channels, args.n_jammers)
+    return theory_ceiling(args.jammer, d, args.channels, args.n_jammers, episode_len=args.episode_len,
+                          static_dwell=getattr(args, "static_dwell", 50.0), p_know=getattr(args, "p_know", 0.9))
 
 
 def make_env(args, obs_mode, bank, seed, pattern_seed=None):
@@ -258,7 +308,8 @@ def make_env(args, obs_mode, bank, seed, pattern_seed=None):
                           switch_cost=args.switch_cost, seed=seed,
                           pattern_seed=seed if pattern_seed is None else pattern_seed,
                           obs_delay=args.obs_delay, n_jammers=args.n_jammers,
-                          obs_quant=args.obs_quant)
+                          obs_quant=args.obs_quant, static_dwell=getattr(args, "static_dwell", 50.0),
+                          p_know=getattr(args, "p_know", 0.9))
 
 
 def run_episode(env, policy, greedy, learn):
@@ -286,6 +337,8 @@ def build_policy(method, env, args, seed):
         return FHSSPolicy(env, seed)
     if method == "afh":
         return AFHPolicy(env, seed, args.afh_window)
+    if method == "bayes":
+        return BayesPolicy(env, seed)
     if method in ("qtable", "qtable2", "qtable4", "qmask"):
         mode = "mask" if method == "qmask" else "argmax"
         k = min({"qtable": 1, "qtable2": 2, "qtable4": 4, "qmask": 1}[method], env.k)
@@ -392,7 +445,7 @@ def cmd_compare(args):
             a1.plot(np.arange(len(sm)) + 9, sm, color=COLORS[m], lw=2, label=f"{m} (10-ep MA)")
     for m, ls in (("random", ":"), ("avoid", "--")):
         a1.axhline(summary[m]["mean"], color="gray", ls=ls, lw=1.3, label=f"{m} ({summary[m]['mean']:.1f}%)")
-    a1.axhline(ceiling, color="black", ls=(0, (1, 3)), lw=1.2, label=f"theory ceiling ({ceiling:.1f}%)")
+    a1.axhline(ceiling, color="black", ls=(0, (1, 3)), lw=1.2, label=f"theory ceiling, exact ({ceiling:.1f}%)")
     a1.set_xlabel("Training episode"); a1.set_ylabel("Communication success rate (%)")
     a1.set_title(f"Learning curves | {jname(args)}, C={args.channels}, SNR {args.snr} dB, JSR {args.jsr} dB, "
                  f"delay {args.obs_delay}, obs {args.obs_quant}", fontsize=9)
@@ -541,7 +594,7 @@ def cmd_delay(args):
         else:
             ax.errorbar(x, [r[m][0] for r in rows], yerr=[r[m][1] for r in rows], color=COLORS[m],
                         marker=MARKERS[m], lw=2, capsize=3, label=LABELS[m])
-    ax.plot(x, [r["ceiling"] for r in rows], color="black", ls="--", label="Theoretical ceiling (approx.)")
+    ax.plot(x, [r["ceiling"] for r in rows], color="black", ls="--", label="Theoretical ceiling (exact, Bayes-optimal)")
     ax.set_xticks(x)
     ax.set_xlabel("Observation delay (slots)  [satellite propagation delay model]")
     ax.set_ylabel("Communication success rate (%)")
@@ -596,7 +649,7 @@ def cmd_baselines(args):
         ys = [rows[n][m][0] for n in names if m in rows[n]]
         es = [rows[n][m][1] for n in names if m in rows[n]]
         ax.bar(xs, ys, w, yerr=es, color=COLORS[m], capsize=2, label=LABELS[m])
-    ax.plot(range(len(names)), [rows[n]["ceiling"] for n in names], "k_", ms=28, mew=1.5, label="Theory ceiling (approx.)")
+    ax.plot(range(len(names)), [rows[n]["ceiling"] for n in names], "k_", ms=28, mew=1.5, label="Theory ceiling (exact, Bayes-optimal)")
     ax.set_xticks(range(len(names))); ax.set_xticklabels(names)
     lo = min(rows[n][m][0] for n in names for m in BASE_METHODS)
     ax.set_ylim(max(0, lo - 8), 100.5)
@@ -610,6 +663,32 @@ def cmd_baselines(args):
     plt.savefig(name + ".png", dpi=250)
     dump(name + ".json", {"args": clean_args(args), "rows": rows})
     print(f"\nsaved {name}.png/.json  ({time.time() - t0:.0f}s)")
+
+
+# ---------------- 검증: ceiling (이론 상한식 vs 베이즈 최적 정책 몬테카를로) ----------------
+def cmd_ceiling(args):
+    """CNN 없이(오라클 관측) 돌아가므로 torch 모델이 필요 없다."""
+    t0 = time.time()
+    rows = []
+    print(f"[설정] 채널={args.channels}, 다중/정적 재머 수={args.n_jammers}, 평가 에피소드={args.eval_episodes} x 시드 {args.seeds}")
+    print(f"  {'재머':12s} {'지연':>4s} | {'이론식':>7s} | {'베이즈 MC':>14s} | {'무작위 MC':>14s} | {'무작위 이론':>9s}")
+    for j in args.jammers:
+        for d in args.delays:
+            a = with_args(args, jammer=j, obs_delay=d)
+            th = ceiling_of(a)
+            b = [run_method("bayes", a, None, s)["eval"] for s in range(args.seeds)]
+            r = [run_method("random", a, None, s)["eval"] for s in range(args.seeds)]
+            n = a.n_jammers if j in ("multi", "static") else 1
+            r_th = 100.0 * (1.0 - 1.0 / a.channels) ** n
+            bm, rm = float(np.mean(b)), float(np.mean(r))
+            se_b = float(np.std(b, ddof=1) / np.sqrt(len(b))) if len(b) > 1 else float("nan")
+            se_r = float(np.std(r, ddof=1) / np.sqrt(len(r))) if len(r) > 1 else float("nan")
+            rows.append({"jammer": jname(a), "delay": d, "theory": th, "bayes_mc": bm, "bayes_se": se_b,
+                         "random_mc": rm, "random_se": se_r, "random_theory": r_th})
+            print(f"  {jname(a):12s} {d:4d} | {th:7.2f} | {bm:7.2f} ± {se_b:4.2f} | {rm:7.2f} ± {se_r:4.2f} | {r_th:9.2f}")
+    name = f"ceiling_check_c{args.channels}_n{args.n_jammers}{qtag(args)}"
+    dump(name + ".json", {"args": clean_args(args), "rows": rows})
+    print(f"\nsaved {name}.json  ({time.time() - t0:.0f}s)  (± 는 시드 간 표준오차)")
 
 
 # ---------------- 실험 6: scenario (궤도 고도 -> 관측 지연 슬롯 수) ----------------
@@ -670,7 +749,7 @@ def cmd_scenario(args):
         ax.errorbar(xs, [r[m][0] for r in plan], yerr=[r[m][1] for r in plan], color=COLORS[m],
                     marker=MARKERS.get(m, "o"), lw=2 if m != "random" else 1.2,
                     ls=":" if m == "random" else "-", capsize=3, label=LABELS[m])
-    ax.plot(xs, [r["ceiling"] for r in plan], "k--", label="Theoretical ceiling (approx.)")
+    ax.plot(xs, [r["ceiling"] for r in plan], "k--", label="Theoretical ceiling (exact, Bayes-optimal)")
     ax.set_xticks(list(xs))
     ax.set_xticklabels([f"{SCENARIO_LABELS[r['scenario']]}\npath {r['path_ms']:.1f} ms\nslot {r['slot_ms']:g} ms\n d={r['d']}"
                         for r in plan], fontsize=8)
@@ -712,6 +791,8 @@ def main():
         p.add_argument("--episode-len", type=int, default=100)
         p.add_argument("--switch-cost", type=float, default=0.0, help="채널 전환 시 보상 페널티")
         p.add_argument("--seeds", type=int, default=3)
+        p.add_argument("--static-dwell", type=float, default=50.0, help="static 재머가 한 채널에 머무는 평균 슬롯 수")
+        p.add_argument("--p-know", type=float, default=0.9, help="fhss_aware 재머가 패턴 채널을 공격할 확률")
 
     p1 = sub.add_parser("compare")
     common(p1)
@@ -743,6 +824,13 @@ def main():
     p5.add_argument("--ref-compare", default=None,
                     help="같은 조건의 compare_*.json을 주면 표 기반과 DQN 결과도 같은 그래프에 겹쳐 그림")
     p5.set_defaults(fn=cmd_baselines)
+
+    p7 = sub.add_parser("ceiling")
+    common(p7)
+    p7.add_argument("--jammers", nargs="+", choices=JAMMER_MODELS,
+                    default=["sequential", "permutation", "reactive", "random", "multi", "static", "fhss_aware"])
+    p7.add_argument("--delays", type=int, nargs="+", default=[0, 2, 4, 28])
+    p7.set_defaults(fn=cmd_ceiling, eval_episodes=1000, seeds=5)
 
     p6 = sub.add_parser("scenario")
     common(p6)

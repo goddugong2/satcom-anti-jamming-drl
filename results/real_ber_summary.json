@@ -1,0 +1,110 @@
+[
+  {
+    "file": "w1",
+    "jammer_id": 4,
+    "rel_power": 0.1,
+    "distance_m": 10,
+    "Nojamming": {
+      "ber_raw": 7.426738739013672e-05,
+      "ber_tone_cancel": 7.426738739013672e-05,
+      "ber_resync_every_block": 8.356571197509766e-05,
+      "slips": 6,
+      "sinr_db_median": 27.36062045671651
+    },
+    "Sine": {
+      "ber_raw": 7.021427154541016e-05,
+      "ber_tone_cancel": 7.021427154541016e-05,
+      "ber_resync_every_block": 7.832050323486328e-05,
+      "slips": 4,
+      "sinr_db_median": 19.34512860360703
+    },
+    "Gaussian": {
+      "ber_raw": 9.083747863769531e-05,
+      "ber_tone_cancel": 9.083747863769531e-05,
+      "ber_resync_every_block": 6.341934204101562e-05,
+      "slips": 4,
+      "sinr_db_median": 19.94776007204497
+    }
+  },
+  {
+    "file": "w15",
+    "jammer_id": 4,
+    "rel_power": 0.8,
+    "distance_m": 10,
+    "Nojamming": {
+      "ber_raw": 5.733966827392578e-05,
+      "ber_tone_cancel": 5.733966827392578e-05,
+      "ber_resync_every_block": 6.282329559326172e-05,
+      "slips": 5,
+      "sinr_db_median": 26.133351713028823
+    },
+    "Sine": {
+      "ber_raw": 0.40516197681427,
+      "ber_tone_cancel": 0.40516197681427,
+      "ber_resync_every_block": 0.4764842987060547,
+      "slips": 26705,
+      "sinr_db_median": -13.24243727354787
+    },
+    "Gaussian": {
+      "ber_raw": 0.4387730360031128,
+      "ber_tone_cancel": 0.4387730360031128,
+      "ber_resync_every_block": 0.4631747007369995,
+      "slips": 26747,
+      "sinr_db_median": -19.664668650475686
+    }
+  },
+  {
+    "file": "w21",
+    "jammer_id": 6,
+    "rel_power": 0.5,
+    "distance_m": 10,
+    "Nojamming": {
+      "ber_raw": 8.881092071533203e-05,
+      "ber_tone_cancel": 8.881092071533203e-05,
+      "ber_resync_every_block": 7.30752944946289e-05,
+      "slips": 4,
+      "sinr_db_median": 22.498881084322218
+    },
+    "Sine": {
+      "ber_raw": 6.031990051269531e-05,
+      "ber_tone_cancel": 6.031990051269531e-05,
+      "ber_resync_every_block": 6.222724914550781e-05,
+      "slips": 3,
+      "sinr_db_median": 13.140257257383038
+    },
+    "Gaussian": {
+      "ber_raw": 0.0009993314743041992,
+      "ber_tone_cancel": 0.0009993314743041992,
+      "ber_resync_every_block": 0.005726933479309082,
+      "slips": 250,
+      "sinr_db_median": 15.041555017487276
+    }
+  },
+  {
+    "file": "w27",
+    "jammer_id": 4,
+    "rel_power": 0.5,
+    "distance_m": 10,
+    "Nojamming": {
+      "ber_raw": 9.5367431640625e-07,
+      "ber_tone_cancel": 9.5367431640625e-07,
+      "ber_resync_every_block": 9.5367431640625e-07,
+      "slips": 0,
+      "sinr_db_median": 25.995484904531963
+    },
+    "Sine": {
+      "ber_raw": 0.009074687957763672,
+      "ber_tone_cancel": 0.008941888809204102,
+      "ber_resync_every_block": 0.04308438301086426,
+      "slips": 1977,
+      "sinr_db_median": 6.654193929875902
+    },
+    "Gaussian": {
+      "ber_raw": 0.024868011474609375,
+      "ber_tone_cancel": 0.024868011474609375,
+      "ber_resync_every_block": 0.11467695236206055,
+      "slips": 5542,
+      "sinr_db_median": 8.650844210404502
+    }
+  }
+]
